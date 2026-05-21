@@ -1,0 +1,27 @@
+import serial
+import csv
+import time
+
+PORT = 'COM5'
+BAUD = 115200
+OUTPUT_FILE = 'sleep_data.csv'
+
+ser = serial.Serial(PORT, BAUD, timeout=1)
+print(f"Logging to {OUTPUT_FILE}... Ctrl+C to stop")
+
+with open(OUTPUT_FILE, 'w', newline='') as f:
+    writer = csv.writer(f)
+    writer.writerow(['timestamp', 'aX', 'aY', 'aZ'])
+    
+    while True:
+        line = ser.readline().decode('utf-8').strip()
+        if line.startswith('aX'):
+            try:
+                parts = line.replace('aX:', '').replace('aY:', '').replace('aZ:', '').split()
+                ax, ay, az = parts[0], parts[1], parts[2]
+                timestamp = time.time()
+                writer.writerow([timestamp, ax, ay, az])
+                f.flush()
+                print(f"{timestamp}, {ax}, {ay}, {az}")
+            except:
+                pass
