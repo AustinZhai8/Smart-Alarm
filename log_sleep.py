@@ -15,11 +15,10 @@ with open(OUTPUT_FILE, 'w', newline='') as f:
     
     while True:
         line = ser.readline().decode('utf-8').strip()
-        if line.startswith('aX'):
+        if ',' in line and line[0].isdigit():
             try:
-                parts = line.replace('aX:', '').replace('aY:', '').replace('aZ:', '').split()
-                ax, ay, az = parts[0], parts[1], parts[2]
-                timestamp = time.time()
+                parts = line.split(',')
+                timestamp, ax, ay, az = parts[0], parts[1], parts[2], parts[3]
                 writer.writerow([timestamp, ax, ay, az])
                 f.flush()
                 print(f"{timestamp}, {ax}, {ay}, {az}")
