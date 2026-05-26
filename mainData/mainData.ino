@@ -11,7 +11,6 @@
 
 // Pins
 #define BL_PIN     32
-#define BL_CHANNEL 0
 #define BTN_PIN    33
 #define SD_CS       5
 #define BUZZER_PIN 25
@@ -148,9 +147,10 @@ void enterSleepMode() {
   sleeping = true;
   if (dataFile) dataFile.close();
   SD.remove("/sleep_data.csv");
-  dataFile   = SD.open("/sleep_data.csv", FILE_WRITE);
+  dataFile = SD.open("/sleep_data.csv", FILE_WRITE);
+  dataFile.println("timestamp,aX,aY,aZ");
   writeCount = 0;
-  ledcWrite(BL_CHANNEL, 0);
+  ledcWrite(BL_PIN, 0);
   tft.fillScreen(TFT_BLACK);
   Serial.println("Sleep logging started");
 }
@@ -158,7 +158,7 @@ void enterSleepMode() {
 void exitSleepMode() {
   sleeping = false;
   if (dataFile) dataFile.close();
-  ledcWrite(BL_CHANNEL, 255);
+  ledcWrite(BL_PIN, 255);
   tft.fillScreen(TFT_BLACK);
   drawStaticElements();
   prevTimeBuf[0] = '\0';
@@ -181,9 +181,8 @@ void checkButton() {
 void setup() {
   Serial.begin(115200);
 
-  ledcSetup(BL_CHANNEL, 5000, 8);
-  ledcAttachPin(BL_PIN, BL_CHANNEL);
-  ledcWrite(BL_CHANNEL, 255);
+  ledcAttach(BL_PIN, 5000, 8);
+  ledcWrite(BL_PIN, 255);
   pinMode(BTN_PIN, INPUT_PULLUP);
   pinMode(BUZZER_PIN, OUTPUT);
 
