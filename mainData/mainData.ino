@@ -3,51 +3,52 @@
 #include <time.h>
 #include <Wire.h>
 #include <MPU6050.h>
-#include <FS.h>
-#include <SPIFFS.h>
+#include <SPI.h>
+#include <SD.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include "secrets.h"
 
-// ── config ────────────────────────────────────────────────
-const char* ssid     = "dlink-AZ";
-const char* password = "6060606060";
-const char* OWM_KEY  = "08717755251ba489e0e875d873a13fa1";
-const char* OWM_CITY = "Calgary,CA";
+// Pins
+#define BL_PIN     32
+#define BL_CHANNEL 0
+#define BTN_PIN    33
+#define SD_CS       5
+#define BUZZER_PIN 25
 
-// ── pins ──────────────────────────────────────────────────
-#define BL_PIN  32
-#define BTN_PIN 33
-
-// ── colors ────────────────────────────────────────────────
+// Colors
 #define C_OFFWHITE  0xDEDB
 #define C_DIM       0x7BEF
 #define C_DIMMER    0x4208
 uint16_t C_CYAN;
 
-// ── objects ───────────────────────────────────────────────
+// Config
+const char* OWM_CITY = "Calgary,CA";
+
+// Objects
 TFT_eSPI tft = TFT_eSPI();
 MPU6050  mpu;
 
-// ── state ─────────────────────────────────────────────────
+// State
 bool     sleeping     = false;
 String   weatherStr   = "CLEAR · --°";
 bool     weatherDirty = true;
 char     prevTimeBuf[6]  = "";
 char     prevDateBuf[12] = "";
-fs::File dataFile;
+File     dataFile;
 int      writeCount   = 0;
 
 unsigned long lastSensorMs  = 0;
 unsigned long lastWeatherMs = 0;
 const unsigned long WEATHER_MS = 15UL * 60UL * 1000UL;
 
-// ── weather ───────────────────────────────────────────────
+// Weather
 void fetchWeather() {
   if (WiFi.status() != WL_CONNECTED) return;
   HTTPClient http;
   http.setTimeout(5000);
   String url = "http://api.openweathermap.org/data/2.5/weather?q="
-               + String(OWM_CITY) + "&appid=" + OWM_KEY + "&units=metric";
+               + String(OWM_CITY) + "&appid=" + String(OWM_API_KEY) + "&units=metric";
   http.begin(url);
   int code = http.GET();
   if (code == 200) {
@@ -57,14 +58,14 @@ void fetchWeather() {
       int    temp = (int)round(doc["main"]["temp"].as<float>());
       String desc = doc["weather"][0]["main"].as<String>();
       desc.toUpperCase();
-      weatherStr   = desc + " · " + String(temp) + "C";
+      weatherStr   = desc + " · " + String(temp) + "°";
       weatherDirty = true;
     }
   }
   http.end();
 }
 
-// ── display ───────────────────────────────────────────────
+// Display
 void drawStaticElements() {
   tft.drawFastHLine(14, 282, 212, 0x2104);
 }
@@ -118,7 +119,7 @@ void updateDisplay() {
   if (weatherDirty) redrawBottomBar();
 }
 
-// ── logging ───────────────────────────────────────────────
+// Logging
 void logSensorData() {
   int16_t ax, ay, az, gx, gy, gz;
   mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
@@ -133,7 +134,7 @@ void logSensorData() {
     dataFile.print(ax);  dataFile.print(",");
     dataFile.print(ay);  dataFile.print(",");
     dataFile.println(az);
-    if (++writeCount >= 10) { dataFile.flush(); writeCount = 0; }
+    if (++writeCount >= 20) { dataFile.flush(); writeCount = 0; }
   }
 
   Serial.print(ts);
@@ -142,21 +143,22 @@ void logSensorData() {
   Serial.print(" aZ:"); Serial.println(az);
 }
 
-// ── sleep mode ────────────────────────────────────────────
+// Sleep mode
 void enterSleepMode() {
   sleeping = true;
   if (dataFile) dataFile.close();
-  SPIFFS.remove("/sleep_data.csv");
-  dataFile   = SPIFFS.open("/sleep_data.csv", FILE_APPEND);
+  SD.remove("/sleep_data.csv");
+  dataFile   = SD.open("/sleep_data.csv", FILE_WRITE);
   writeCount = 0;
-  ledcWrite(BL_PIN, 0);
+  ledcWrite(BL_CHANNEL, 0);
   tft.fillScreen(TFT_BLACK);
   Serial.println("Sleep logging started");
 }
 
 void exitSleepMode() {
   sleeping = false;
-  ledcWrite(BL_PIN, 255);
+  if (dataFile) dataFile.close();
+  ledcWrite(BL_CHANNEL, 255);
   tft.fillScreen(TFT_BLACK);
   drawStaticElements();
   prevTimeBuf[0] = '\0';
@@ -175,13 +177,15 @@ void checkButton() {
   }
 }
 
-// ── setup ─────────────────────────────────────────────────
+// Setup
 void setup() {
   Serial.begin(115200);
 
-  ledcAttach(BL_PIN, 5000, 8);
-  ledcWrite(BL_PIN, 255);
+  ledcSetup(BL_CHANNEL, 5000, 8);
+  ledcAttachPin(BL_PIN, BL_CHANNEL);
+  ledcWrite(BL_CHANNEL, 255);
   pinMode(BTN_PIN, INPUT_PULLUP);
+  pinMode(BUZZER_PIN, OUTPUT);
 
   tft.init();
   tft.setRotation(0);
@@ -191,7 +195,7 @@ void setup() {
   tft.setTextColor(C_DIM, TFT_BLACK);
   tft.drawCentreString("connecting...", 120, 150, 2);
 
-  WiFi.begin(ssid, password);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
   while (WiFi.status() != WL_CONNECTED) delay(500);
 
   configTime(-6 * 3600, 0, "pool.ntp.org", "time.google.com");
@@ -203,7 +207,13 @@ void setup() {
   Wire.begin();
   mpu.initialize();
 
-  if (!SPIFFS.begin(true)) Serial.println("SPIFFS failed");
+  if (!SD.begin(SD_CS)) {
+    Serial.println("SD card failed");
+    tft.drawCentreString("SD card failed!", 120, 150, 2);
+    delay(2000);
+  } else {
+    Serial.println("SD card ready");
+  }
 
   tft.fillScreen(TFT_BLACK);
   drawStaticElements();
@@ -213,13 +223,13 @@ void setup() {
   Serial.println("Setup complete");
 }
 
-// ── loop ──────────────────────────────────────────────────
+// Loop
 void loop() {
   checkButton();
 
   unsigned long now = millis();
 
-  if (now - lastSensorMs >= 2000) {
+  if (now - lastSensorMs >= 500) {
     lastSensorMs = now;
     sleeping ? logSensorData() : updateDisplay();
   }

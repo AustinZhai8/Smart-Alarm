@@ -4,7 +4,7 @@ import time
 
 PORT = 'COM5'
 BAUD = 115200
-OUTPUT_FILE = 'sleep_data.csv'
+OUTPUT_FILE = 'Night 1.csv'
 
 ser = serial.Serial(PORT, BAUD, timeout=1)
 print(f"Logging to {OUTPUT_FILE}... Ctrl+C to stop")
