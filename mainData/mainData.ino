@@ -733,6 +733,7 @@ void logSensorData() {
   if (getLocalTime(&ti)) strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &ti);
   else strcpy(ts, "time_error");
 
+  detachInterrupt(digitalPinToInterrupt(CLK_PIN));
   if (dataFile) {
     dataFile.print(ts);  dataFile.print(",");
     dataFile.print(ax);  dataFile.print(",");
@@ -740,11 +741,7 @@ void logSensorData() {
     dataFile.println(az);
     if (++writeCount >= 20) { dataFile.flush(); writeCount = 0; }
   }
-
-  Serial.print(ts);
-  Serial.print(" aX:"); Serial.print(ax);
-  Serial.print(" aY:"); Serial.print(ay);
-  Serial.print(" aZ:"); Serial.println(az);
+  attachInterrupt(digitalPinToInterrupt(CLK_PIN), ISR_encoder, FALLING);
 }
 
 // ── sleep mode ────────────────────────────────────────────
@@ -843,7 +840,14 @@ void checkAlarm() {
 }
 
 // ── input ─────────────────────────────────────────────────
+unsigned long lastBackActionMs = 0;
+#define BACK_LOCKOUT_MS 400
+
 void handleBackButton() {
+  unsigned long now = millis();
+  if (now - lastBackActionMs < BACK_LOCKOUT_MS) return;  // hard lockout vs. bounce
+  lastBackActionMs = now;
+
   if (ringing)         { stopRinging(); return; }     // BACK during alarm = exit now (1 press)
   if (sleeping)        { exitSleepMode(); return; }   // GPIO 33 leaves sleep mode, saves file
   if (screen == HOME)  { enterSleepMode(); return; }  // and starts a fresh sleep session
@@ -863,7 +867,7 @@ void setup() {
   pinMode(DT_PIN,  INPUT);
   attachInterrupt(digitalPinToInterrupt(CLK_PIN), ISR_encoder, FALLING);
   encBtn.setDebounceTime(50);
-  backBtn.setDebounceTime(50);
+  backBtn.setDebounceTime(150);
 
   tft.init();
   tft.setRotation(0);
@@ -907,6 +911,7 @@ void setup() {
 void loop() {
   encBtn.loop();
   backBtn.loop();
+  Serial.println(digitalRead(BTN_PIN));
 
   // encoder rotation (one tick = one action)
   static int lastCounter = 0;
