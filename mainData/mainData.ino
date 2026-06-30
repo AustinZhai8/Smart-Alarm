@@ -10,6 +10,8 @@
 #include <EEPROM.h>
 #include <ezButton.h>
 #include "secrets.h"
+#include "sleep_classifier.h"
+#include "aura01_features.h"
 
 // Pins
 #define BL_PIN     32
@@ -102,6 +104,20 @@ char     prevTimeBuf[6]  = "";
 char     prevDateBuf[12] = "";
 File     dataFile;
 int      writeCount   = 0;
+
+// ── sleep-stage classifier ────────────────────────────────
+Aura::SleepClassifier sleepClf;
+File     stageFile;                 // /sleep_stages.csv (timestamp,raw,smoothed)
+bool     sleepSummaryDirty = true;  // reparse the stage file on next Sleep Data view
+// Parsed summary of the most recent session (filled by parseSleepSummary()).
+#define  SEG_MAX 64
+uint8_t  segState[SEG_MAX];          // 0 deep, 1 light
+uint16_t segCount[SEG_MAX];          // windows in this run
+int      segN        = 0;
+long     sumDeepWin  = 0;            // total 30 s windows classified deep
+long     sumLightWin = 0;            // total 30 s windows classified light
+char     sumStart[6] = "";          // HH:MM of first window
+char     sumEnd[6]   = "";          // HH:MM of last window
 
 // current weather detail (parsed from fetchWeather)
 int   wxTemp = 0, wxHi = 0, wxLo = 0, wxFeels = 0, wxHumidity = 0, wxWind = 0;
@@ -476,41 +492,113 @@ void drawEditWake() {
   tft.drawCentreString("TURN: ADJUST  PRESS: NEXT", 120, 300, 2);
 }
 
+// Format a count of 30 s windows as "Xh Ym".
+void fmtHM(long windows, char* buf, size_t n) {
+  long sec = windows * 30L;
+  int h = sec / 3600;
+  int m = (sec % 3600) / 60;
+  snprintf(buf, n, "%dh %02dm", h, m);
+}
+
+// Parse /sleep_stages.csv into the summary globals (segState/segCount/totals/
+// start-end). Run-length-encodes the smoothed column; on segment overflow the
+// remainder is lumped into the last segment. Safe to call when no file exists.
+void parseSleepSummary() {
+  segN = 0; sumDeepWin = 0; sumLightWin = 0;
+  sumStart[0] = '\0'; sumEnd[0] = '\0';
+
+  File f = SD.open("/sleep_stages.csv", FILE_READ);
+  if (!f) return;
+
+  bool first = true;
+  int  curState = -1;
+  while (f.available()) {
+    String line = f.readStringUntil('\n');
+    if (first) { first = false; continue; }      // skip header
+    line.trim();
+    if (line.length() < 3) continue;
+
+    int lastComma = line.lastIndexOf(',');
+    if (lastComma < 0) continue;
+    String sm = line.substring(lastComma + 1);
+    int state = (sm == "light") ? 1 : 0;          // 1 light, 0 deep
+
+    if (state) sumLightWin++; else sumDeepWin++;
+
+    // capture HH:MM from "YYYY-MM-DD HH:MM:SS" when present
+    if (line.length() >= 16 && line[13] == ':') {
+      char hm[6];
+      line.substring(11, 16).toCharArray(hm, sizeof(hm));
+      if (sumStart[0] == '\0') strcpy(sumStart, hm);
+      strcpy(sumEnd, hm);
+    }
+
+    // run-length encode into segments
+    if (state != curState) {
+      curState = state;
+      if (segN < SEG_MAX) { segState[segN] = state; segCount[segN] = 1; segN++; }
+      else                 segCount[SEG_MAX - 1]++;   // overflow: lump in
+    } else if (segN > 0) {
+      segCount[segN - 1]++;
+    }
+  }
+  f.close();
+}
+
 void drawSleepData() {
+  if (sleepSummaryDirty) { parseSleepSummary(); sleepSummaryDirty = false; }
+
   drawSubHeader("Sleep Data");
   clearContent();
+
+  long totalWin = sumDeepWin + sumLightWin;
+  if (totalWin == 0) {
+    tft.setTextColor(COL_TEXT_55, TFT_BLACK);
+    tft.drawCentreString("No sleep data yet", 120, 150, 4);
+    tft.setTextColor(COL_TEXT_30, TFT_BLACK);
+    tft.drawCentreString("Track a night to see stages", 120, 184, 2);
+    return;
+  }
+
+  char hm[12];
+  fmtHM(totalWin, hm, sizeof(hm));
   tft.setTextColor(COL_TEXT, TFT_BLACK);
-  tft.drawString("7h 24m", 18, 58, 4);
+  tft.drawString(hm, 18, 58, 4);
   tft.setTextColor(COL_TEXT_40, TFT_BLACK);
   tft.drawString("LAST NIGHT", 120, 64, 2);
 
-  // segments: state(0=light,1=deep) + weight
-  const uint8_t seg_s[9] = { 0, 1, 0, 1, 0, 1, 0, 1, 0 };
-  const float   seg_w[9] = { 2, 3, 1.5, 2.5, 2, 1.5, 1.5, 2, 2.5 };
-  float totalW = 0; for (int i = 0; i < 9; i++) totalW += seg_w[i];
-  int x0 = 18, w = 204, gap = 2;
-  float avail = w - gap * 8;
-
-  // light lane (top), deep lane (bottom)
+  // two-lane hypnogram (light top = COL_ACCENT, deep bottom = COL_DEEP)
+  int x0 = 18, w = 204, gap = (segN > 1) ? 2 : 0;
+  float avail = w - gap * (segN - 1);
+  if (avail < 1) avail = w;
   int yL = 110, yD = 142, hh = 26;
   float fx = x0;
-  for (int i = 0; i < 9; i++) {
-    int bw = (int)(avail * (seg_w[i] / totalW));
-    tft.fillRoundRect((int)fx, yL, bw, hh, 3, seg_s[i] == 0 ? COL_ACCENT : COL_DIMSLOT);
-    tft.fillRoundRect((int)fx, yD, bw, hh, 3, seg_s[i] == 1 ? COL_DEEP : COL_DIMSLOT);
+  for (int i = 0; i < segN; i++) {
+    int bw = (int)(avail * ((float)segCount[i] / (float)totalWin));
+    if (bw < 2) bw = 2;
+    bool light = (segState[i] == 1);
+    tft.fillRoundRect((int)fx, yL, bw, hh, 3, light ? COL_ACCENT : COL_DIMSLOT);
+    tft.fillRoundRect((int)fx, yD, bw, hh, 3, light ? COL_DIMSLOT : COL_DEEP);
     fx += bw + gap;
   }
 
+  // start / end times
   tft.setTextColor(COL_TEXT_40, TFT_BLACK);
-  tft.drawString("23:42", x0, yD + hh + 6, 2);
-  tft.drawString("06:30", x0 + w - tft.textWidth("06:30", 2), yD + hh + 6, 2);
+  if (sumStart[0]) tft.drawString(sumStart, x0, yD + hh + 6, 2);
+  if (sumEnd[0])   tft.drawString(sumEnd, x0 + w - tft.textWidth(sumEnd, 2), yD + hh + 6, 2);
 
-  // legend
+  // legend with real durations
+  fmtHM(sumLightWin, hm, sizeof(hm));
+  char lg[20];
   tft.fillRoundRect(40, 210, 8, 8, 2, COL_ACCENT);
   tft.setTextColor(COL_TEXT_75, TFT_BLACK);
-  tft.drawString("Light 5h 14m", 54, 208, 2);
+  snprintf(lg, sizeof(lg), "Light %s", hm);
+  tft.drawString(lg, 54, 208, 2);
+
+  fmtHM(sumDeepWin, hm, sizeof(hm));
   tft.fillRoundRect(40, 232, 8, 8, 2, COL_DEEP);
-  tft.drawString("Deep 2h 10m", 54, 230, 2);
+  snprintf(lg, sizeof(lg), "Deep %s", hm);
+  tft.drawString(lg, 54, 230, 2);
 }
 
 // minimal line weather icon
@@ -685,7 +773,7 @@ void onPress() {
       switch (menuSel) {
         case 0: enterSleepMode(); break;          // stays in sleep mode
         case 1: screen = ALARM_MENU; dirty = true; break;
-        case 2: screen = SLEEP_DATA; dirty = true; break;
+        case 2: screen = SLEEP_DATA; sleepSummaryDirty = true; dirty = true; break;
         case 3: screen = WEATHER;    dirty = true; break;
         case 4: screen = SETTINGS;   dirty = true; break;
         case 5: screen = RESTART; rChoiceYes = false; dirty = true; break;
@@ -733,6 +821,11 @@ void logSensorData() {
   if (getLocalTime(&ti)) strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &ti);
   else strcpy(ts, "time_error");
 
+  // Feed the classifier with the sample we just read (no extra I2C read). Returns
+  // true once per completed 30 s window, with lastRaw()/lastSmoothed() ready.
+  bool haveStage = sleepClf.addSample(ax, ay, az);
+  int  rawP = sleepClf.lastRaw(), smP = sleepClf.lastSmoothed();
+
   detachInterrupt(digitalPinToInterrupt(CLK_PIN));
   if (dataFile) {
     dataFile.print(ts);  dataFile.print(",");
@@ -740,6 +833,12 @@ void logSensorData() {
     dataFile.print(ay);  dataFile.print(",");
     dataFile.println(az);
     if (++writeCount >= 20) { dataFile.flush(); writeCount = 0; }
+  }
+  if (haveStage && stageFile) {
+    stageFile.print(ts);                       stageFile.print(",");
+    stageFile.print(rawP == 0 ? "deep" : "light"); stageFile.print(",");
+    stageFile.println(smP  == 0 ? "deep" : "light");
+    stageFile.flush();                         // once per 30 s — cheap
   }
   attachInterrupt(digitalPinToInterrupt(CLK_PIN), ISR_encoder, FALLING);
 }
@@ -753,6 +852,16 @@ void enterSleepMode() {
   dataFile = SD.open("/sleep_data.csv", FILE_WRITE);
   dataFile.println("timestamp,aX,aY,aZ");
   writeCount = 0;
+
+  // Stage classifier: fresh window state + a fresh /sleep_stages.csv. Opened
+  // here only; closed only in exitSleepMode() (same single open/close pattern as
+  // dataFile, so a buzzer-time brownout can't corrupt a mid-write file).
+  SD.remove("/sleep_stages.csv");
+  stageFile = SD.open("/sleep_stages.csv", FILE_WRITE);
+  stageFile.println("timestamp,raw,smoothed");
+  sleepClf.reset();
+  sleepSummaryDirty = true;          // next Sleep Data view reparses this session
+
   ledcWrite(BL_PIN, 0);
   tft.fillScreen(TFT_BLACK);
   Serial.println("Sleep logging started");
@@ -760,7 +869,8 @@ void enterSleepMode() {
 
 void exitSleepMode() {
   sleeping = false;
-  if (dataFile) dataFile.close();
+  if (dataFile)  dataFile.close();
+  if (stageFile) stageFile.close();   // the one place the stage file closes
   ledcWrite(BL_PIN, 255);
   enterHome();
   Serial.println("Sleep logging stopped");
@@ -911,7 +1021,6 @@ void setup() {
 void loop() {
   encBtn.loop();
   backBtn.loop();
-  Serial.println(digitalRead(BTN_PIN));
 
   // encoder rotation (one tick = one action)
   static int lastCounter = 0;
