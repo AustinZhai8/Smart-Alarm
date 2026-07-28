@@ -13,38 +13,36 @@
 #include "sleep_classifier.h"
 #include "smart_alarm_features.h"
 
-// Pins
+// pins
 #define BL_PIN     32
-#define BTN_PIN    33    // sleep / BACK (context-sensitive)
+#define BTN_PIN    33    // sleep / back
 #define SD_CS       5
 #define BUZZER_PIN 25
-#define CLK_PIN    16    // rotary encoder CLK (interrupt)
-#define DT_PIN      4    // rotary encoder DT
-#define SW_PIN     34    // rotary encoder switch (click)
+#define CLK_PIN    16    // encoder CLK (interrupt)
+#define DT_PIN      4    // encoder DT
+#define SW_PIN     34    // encoder button
 
-// Colors (legacy HOME palette)
+// home screen colors
 #define C_OFFWHITE  0xDEDB
 #define C_DIM       0x7BEF
 #define C_DIMMER    0x4208
 uint16_t C_CYAN;
 
-// Colors (RGB565 palette for nav UI)
-#define COL_BG        0x0000  // pure black
-#define COL_TEXT      0xF77C  // off-white #F0ECE6
-#define COL_ACCENT    0x8E9F  // cyan #8FD0FF
-#define COL_DEEP      0x9C5E  // purple #9D8BF0
-#define COL_KNOBTEXT  0x08A3  // dark #04121C (text on accent fills)
+// menu colors
+#define COL_BG        0x0000
+#define COL_TEXT      0xF77C  // off-white
+#define COL_ACCENT    0x8E9F  // cyan
+#define COL_DEEP      0x9C5E  // purple
+#define COL_KNOBTEXT  0x08A3  // text on accent fills
 #define COL_TEXT_75   0xB596
 #define COL_TEXT_55   0x8410
 #define COL_TEXT_40   0x630C
 #define COL_TEXT_30   0x4A49
-#define COL_HAIRLINE  0x18E3  // dim divider
-#define COL_DIMSLOT   0x10A2  // very dim slot backgrounds
+#define COL_HAIRLINE  0x18E3  // divider
+#define COL_DIMSLOT   0x10A2  // slot background
 
-// Config
 const char* OWM_CITY = "Calgary,CA";
 
-// Objects
 TFT_eSPI tft = TFT_eSPI();
 MPU6050  mpu;
 ezButton encBtn(SW_PIN);
@@ -62,7 +60,7 @@ struct AlarmCfg { bool on; uint8_t hour, minute; };       // 24h
 struct WakeCfg  { bool on; uint8_t windowMin, sens; };     // 5..60 / 1..3
 AlarmCfg alarmCfg = { true, 6, 30 };
 WakeCfg  wake  = { true, 30, 2 };
-uint8_t  snoozeDurationMin = 10;   // Settings: snooze length (1..30)
+uint8_t  snoozeDurationMin = 10;   // snooze length 1..30
 
 const char* MENU_ITEMS[6] = {
   "Enter Sleep Mode", "Alarm", "Sleep Data", "Weather", "Settings", "Restart"
@@ -80,23 +78,22 @@ bool          ringing       = false;
 unsigned long lastBeepMs    = 0;
 bool          alarmFlashOn  = false;
 int           lastCheckMin  = -1;
-bool          alarmFromSleep = false;   // did the alarm fire while in sleep mode?
-unsigned long ringStartMs   = 0;        // when the current ring began
-#define RING_TIMEOUT_MS (3UL * 60UL * 1000UL)   // auto-off after 3 min unanswered
+bool          alarmFromSleep = false;   // alarm fired from sleep
+unsigned long ringStartMs   = 0;
+#define RING_TIMEOUT_MS (3UL * 60UL * 1000UL)   // auto-off after 3 min
 
 // encoder ISR
 volatile int  counter   = 0;
-volatile int  direction = 0;
 volatile unsigned long lastTime = 0;
 
 void IRAM_ATTR ISR_encoder() {
   if ((millis() - lastTime) < 50) return;
   lastTime = millis();
-  if (digitalRead(DT_PIN) == HIGH) { counter++; direction = 1; }
-  else                             { counter--; direction = -1; }
+  if (digitalRead(DT_PIN) == HIGH) counter++;
+  else                             counter--;
 }
 
-// State
+// state
 bool     sleeping     = false;
 String   weatherStr   = "CLEAR · --°";
 bool     weatherDirty = true;
@@ -108,21 +105,22 @@ int      writeCount   = 0;
 // sleep-stage classifier
 SmartAlarm::SleepClassifier sleepClf;
 File     stageFile;                 // /sleep_stages.csv (timestamp,raw,smoothed)
-bool     sleepSummaryDirty = true;  // reparse the stage file on next Sleep Data view
-bool     smartWakeUsed     = false; // smart wake fires at most once per sleep session
-unsigned long wakeGuardMs  = 0;     // set on wake; briefly blocks re-entering sleep
-#define  WAKE_GUARD_MS 3000         // ignore a stray BACK press for 3 s after waking
-// Parsed summary of the most recent session (filled by parseSleepSummary()).
+bool     sleepSummaryDirty = true;  // reparse stage file on next view
+bool     smartWakeUsed     = false; // smart wake fires once per session
+bool     sleepSessionStarted = false; // show demo data until a real night is tracked
+unsigned long wakeGuardMs  = 0;     // blocks re-entering sleep after waking
+#define  WAKE_GUARD_MS 3000
+// last session summary
 #define  SEG_MAX 64
 uint8_t  segState[SEG_MAX];          // 0 deep, 1 light
-uint16_t segCount[SEG_MAX];          // windows in this run
+uint16_t segCount[SEG_MAX];
 int      segN        = 0;
-long     sumDeepWin  = 0;            // total 30 s windows classified deep
-long     sumLightWin = 0;            // total 30 s windows classified light
-char     sumStart[6] = "";          // HH:MM of first window
-char     sumEnd[6]   = "";          // HH:MM of last window
+long     sumDeepWin  = 0;            // deep windows
+long     sumLightWin = 0;            // light windows
+char     sumStart[6] = "";          // first HH:MM
+char     sumEnd[6]   = "";          // last HH:MM
 
-// current weather detail (parsed from fetchWeather)
+// current weather
 int   wxTemp = 0, wxHi = 0, wxLo = 0, wxFeels = 0, wxHumidity = 0, wxWind = 0;
 char  wxCond[16] = "Clear";
 
@@ -140,7 +138,7 @@ const unsigned long WEATHER_MS = 15UL * 60UL * 1000UL;
 #define EE_MAGIC_VAL   0xAB
 #define EE_ALARM_ADDR  1   // on, hour, minute
 #define EE_WAKE_ADDR   4   // on, windowMin, sens
-#define EE_SNOOZE_ADDR 7   // snoozeDurationMin
+#define EE_SNOOZE_ADDR 7   // snooze
 
 void saveConfig() {
   EEPROM.write(EE_MAGIC_ADDR, EE_MAGIC_VAL);
@@ -200,7 +198,7 @@ void fetchWeather() {
   http.end();
 }
 
-// Map an OWM "main" condition string to our icon index.
+// weather condition -> icon index
 uint8_t condToIcon(const char* main) {
   if (strstr(main, "Rain") || strstr(main, "Drizzle") || strstr(main, "Thunder")) return 3;
   if (strstr(main, "Cloud")) {
@@ -208,10 +206,10 @@ uint8_t condToIcon(const char* main) {
     return 2;
   }
   if (strstr(main, "Clear")) return 0;
-  return 1;  // mist/haze/snow fallback -> partly
+  return 1;  // mist/haze/snow -> partly
 }
 
-// Fetch /forecast (3-hourly) and aggregate into 5 daily hi/lo + noon condition.
+// fetch 5-day forecast (3-hourly, aggregated to daily hi/lo + noon condition)
 void fetchForecast() {
   if (WiFi.status() != WL_CONNECTED) return;
   HTTPClient http;
@@ -222,7 +220,7 @@ void fetchForecast() {
   int code = http.GET();
   if (code != 200) { http.end(); return; }
 
-  // Keep only the fields we need so the doc stays small.
+  // only parse the fields we need
   StaticJsonDocument<200> filter;
   filter["list"][0]["dt"] = true;
   filter["list"][0]["main"]["temp_max"] = true;
@@ -237,10 +235,10 @@ void fetchForecast() {
 
   JsonArray list = doc["list"].as<JsonArray>();
 
-  // Aggregate by calendar day. Track up to 5 distinct upcoming days.
+  // group by day, up to 5 days
   long    dayKey[5];
   int     dHi[5], dLo[5];
-  long    dNoonDelta[5];   // |seconds from local noon| of the chosen icon entry
+  long    dNoonDelta[5];   // distance from noon of the chosen icon entry
   uint8_t dIcon[5];
   int     nDays = 0;
 
@@ -248,9 +246,8 @@ void fetchForecast() {
     long dt = item["dt"].as<long>();
     time_t t = (time_t)dt;
     struct tm lt;
-    localtime_r(&t, &lt);   // applies the timezone set by configTime()
+    localtime_r(&t, &lt);
 
-    // local-day key + seconds-from-noon, straight from the local fields
     long key = (long)(lt.tm_year) * 1000 + lt.tm_yday;
     long secOfDay = (long)lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec;
     long noonDelta = labs(secOfDay - 43200L);
@@ -285,7 +282,7 @@ void fetchForecast() {
   forecastReady = (nDays > 0);
 }
 
-// HOME display (incremental redraw so the clock doesn't flicker)
+// home screen (incremental redraw to avoid flicker)
 void drawStaticElements() {
   tft.drawFastHLine(14, 282, 212, 0x2104);
 }
@@ -345,7 +342,7 @@ void updateDisplay() {
   if (weatherDirty) redrawBottomBar();
 }
 
-// Reset HOME and draw it fresh (used when returning from a menu).
+// redraw home from scratch (returning from a menu)
 void enterHome() {
   screen = HOME;
   tft.fillScreen(TFT_BLACK);
@@ -356,8 +353,7 @@ void enterHome() {
   updateDisplay();
 }
 
-// small drawing helpers
-// Degree symbol (built-in fonts lack it) as a small ring.
+// degree symbol (fonts lack it)
 void drawDegree(int x, int y, uint16_t color) {
   tft.drawCircle(x, y, 2, color);
 }
@@ -427,14 +423,14 @@ void drawAlarmMenu() {
 void drawEditAlarm() {
   drawSubHeader("Edit Alarm");
   clearContent();
-  // Alarm row + toggle
+  // alarm row + toggle
   if (alarmField == 0) drawAccentBar(52, 28);
   tft.setTextColor(alarmField == 0 ? COL_ACCENT : COL_TEXT_75, TFT_BLACK);
   tft.drawString("Alarm", 22, 58, 2);
   drawToggle(180, 56, alarmCfg.on, alarmField == 0);
   tft.drawFastHLine(18, 92, 204, COL_HAIRLINE);
 
-  // Big HH:MM (24h), Font 7
+  // big HH:MM
   char hh[3], mm[3];
   sprintf(hh, "%02d", alarmCfg.hour);
   sprintf(mm, "%02d", alarmCfg.minute);
@@ -464,7 +460,7 @@ void drawEditWake() {
   drawToggle(180, 56, wake.on, wakeField == 0);
   tft.drawFastHLine(18, 92, 204, COL_HAIRLINE);
 
-  // minutes number (Font 7) + MIN
+  // minutes + MIN
   char mb[4]; sprintf(mb, "%d", wake.windowMin);
   uint16_t base = wake.on ? COL_TEXT : COL_TEXT_40;
   int wN = tft.textWidth(mb, 7);
@@ -487,7 +483,7 @@ void drawEditWake() {
     tft.fillRoundRect(bx, 210, 18, 18, 5, active ? COL_ACCENT : COL_DIMSLOT);
     if (active && wakeField == 2) tft.drawRoundRect(bx - 1, 209, 20, 20, 6, COL_ACCENT);
     char d[2] = { (char)('0' + n), '\0' };
-    tft.setTextColor(active ? COL_KNOBTEXT : COL_TEXT_40);  // transparent bg over chip fill
+    tft.setTextColor(active ? COL_KNOBTEXT : COL_TEXT_40);
     tft.drawCentreString(d, bx + 9, 212, 2);
   }
   tft.setTextColor(COL_TEXT_30, TFT_BLACK);
@@ -497,7 +493,7 @@ void drawEditWake() {
   tft.drawCentreString("TURN: ADJUST  PRESS: NEXT", 120, 300, 2);
 }
 
-// Format a count of 30 s windows as "Xh Ym".
+// windows -> "Xh Ym"
 void fmtHM(long windows, char* buf, size_t n) {
   long sec = windows * 30L;
   int h = sec / 3600;
@@ -505,9 +501,7 @@ void fmtHM(long windows, char* buf, size_t n) {
   snprintf(buf, n, "%dh %02dm", h, m);
 }
 
-// Parse /sleep_stages.csv into the summary globals (segState/segCount/totals/
-// start-end). Run-length-encodes the smoothed column; on segment overflow the
-// remainder is lumped into the last segment. Safe to call when no file exists.
+// parse /sleep_stages.csv into the summary globals (run-length encoded)
 void parseSleepSummary() {
   segN = 0; sumDeepWin = 0; sumLightWin = 0;
   sumStart[0] = '\0'; sumEnd[0] = '\0';
@@ -530,7 +524,7 @@ void parseSleepSummary() {
 
     if (state) sumLightWin++; else sumDeepWin++;
 
-    // capture HH:MM from "YYYY-MM-DD HH:MM:SS" when present
+    // grab HH:MM from "YYYY-MM-DD HH:MM:SS"
     if (line.length() >= 16 && line[13] == ':') {
       char hm[6];
       line.substring(11, 16).toCharArray(hm, sizeof(hm));
@@ -538,7 +532,7 @@ void parseSleepSummary() {
       strcpy(sumEnd, hm);
     }
 
-    // run-length encode into segments
+    // run-length encode
     if (state != curState) {
       curState = state;
       if (segN < SEG_MAX) { segState[segN] = state; segCount[segN] = 1; segN++; }
@@ -550,6 +544,22 @@ void parseSleepSummary() {
   f.close();
 }
 
+// temporary demo night, shown only until a real session exists.
+// enterSleepMode() wipes /sleep_stages.csv, so real tracking replaces it.
+void fillDemoSummary() {
+  static const uint8_t  demoState[] = { 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1 };
+  static const uint16_t demoCount[] = { 36,64,28,52,40,44,54,34,66,26,58,20,78,16,96,12,110 };
+  segN = sizeof(demoState) / sizeof(demoState[0]);
+  sumDeepWin = 0; sumLightWin = 0;
+  for (int i = 0; i < segN; i++) {
+    segState[i] = demoState[i];
+    segCount[i] = demoCount[i];
+    if (demoState[i]) sumLightWin += demoCount[i]; else sumDeepWin += demoCount[i];
+  }
+  strcpy(sumStart, "23:15");
+  strcpy(sumEnd,   "06:12");
+}
+
 void drawSleepData() {
   if (sleepSummaryDirty) { parseSleepSummary(); sleepSummaryDirty = false; }
 
@@ -557,12 +567,9 @@ void drawSleepData() {
   clearContent();
 
   long totalWin = sumDeepWin + sumLightWin;
-  if (totalWin == 0) {
-    tft.setTextColor(COL_TEXT_55, TFT_BLACK);
-    tft.drawCentreString("No sleep data yet", 120, 150, 4);
-    tft.setTextColor(COL_TEXT_30, TFT_BLACK);
-    tft.drawCentreString("Track a night to see stages", 120, 184, 2);
-    return;
+  if (!sleepSessionStarted) {                // show demo until a real night is tracked
+    fillDemoSummary();
+    totalWin = sumDeepWin + sumLightWin;
   }
 
   char hm[12];
@@ -572,7 +579,7 @@ void drawSleepData() {
   tft.setTextColor(COL_TEXT_40, TFT_BLACK);
   tft.drawString("LAST NIGHT", 120, 64, 2);
 
-  // two-lane hypnogram (light top = COL_ACCENT, deep bottom = COL_DEEP)
+  // two-lane hypnogram
   int x0 = 18, w = 204, gap = (segN > 1) ? 2 : 0;
   float avail = w - gap * (segN - 1);
   if (avail < 1) avail = w;
@@ -592,7 +599,7 @@ void drawSleepData() {
   if (sumStart[0]) tft.drawString(sumStart, x0, yD + hh + 6, 2);
   if (sumEnd[0])   tft.drawString(sumEnd, x0 + w - tft.textWidth(sumEnd, 2), yD + hh + 6, 2);
 
-  // legend with real durations
+  // legend
   fmtHM(sumLightWin, hm, sizeof(hm));
   char lg[20];
   tft.fillRoundRect(40, 210, 8, 8, 2, COL_ACCENT);
@@ -606,7 +613,7 @@ void drawSleepData() {
   tft.drawString(lg, 54, 230, 2);
 }
 
-// minimal line weather icon
+// weather icon
 void drawWxIcon(int cx, int cy, uint8_t type, uint16_t color) {
   switch (type) {
     case 0: // sun
@@ -636,7 +643,7 @@ void drawWxIcon(int cx, int cy, uint8_t type, uint16_t color) {
 void drawWeather() {
   drawSubHeader("Weather");
   clearContent();
-  // today big temp
+  // big temp
   char tb[6]; sprintf(tb, "%d", wxTemp);
   tft.setTextColor(COL_TEXT, TFT_BLACK);
   tft.drawString(tb, 18, 58, 7);
@@ -739,27 +746,49 @@ void render() {
   }
 }
 
-// navigation logic
-const uint8_t A_FIELDS[3] = { 0, 1, 2 };  // enabled, h, m
-const uint8_t W_FIELDS[3] = { 0, 1, 2 };  // enabled, minutes, sens
-
+// navigation
 void onRotate(int dir) {
   switch (screen) {
-    case MENU:
-      menuSel = (menuSel + dir + 6) % 6;
+    case MENU: {
+      int s = menuSel + dir;
+      if (s < 0) s = 5;
+      if (s > 5) s = 0;
+      menuSel = s;
       dirty = true; break;
-    case ALARM_MENU:
-      alarmSel = (alarmSel + dir + 2) % 2;
+    }
+    case ALARM_MENU: {
+      int s = alarmSel + dir;
+      if (s < 0) s = 1;
+      if (s > 1) s = 0;
+      alarmSel = s;
       dirty = true; break;
+    }
     case EDIT_ALARM:
-      if (alarmField == 0)      alarmCfg.on = !alarmCfg.on;
-      else if (alarmField == 1) alarmCfg.hour = (alarmCfg.hour + dir + 24) % 24;
-      else                      alarmCfg.minute = (alarmCfg.minute + dir + 60) % 60;
+      if (alarmField == 0) {
+        alarmCfg.on = !alarmCfg.on;
+      } else if (alarmField == 1) {
+        int h = alarmCfg.hour + dir;
+        if (h < 0)  h = 23;
+        if (h > 23) h = 0;
+        alarmCfg.hour = h;
+      } else {
+        int m = alarmCfg.minute + dir;
+        if (m < 0)  m = 59;
+        if (m > 59) m = 0;
+        alarmCfg.minute = m;
+      }
       saveConfig(); dirty = true; break;
     case EDIT_WAKE:
-      if (wakeField == 0)       wake.on = !wake.on;
-      else if (wakeField == 1)  wake.windowMin = constrain(wake.windowMin + dir * 5, 5, 60);
-      else                      wake.sens = ((wake.sens - 1 + dir + 3) % 3) + 1;
+      if (wakeField == 0) {
+        wake.on = !wake.on;
+      } else if (wakeField == 1) {
+        wake.windowMin = constrain(wake.windowMin + dir * 5, 5, 60);
+      } else {
+        int s = wake.sens + dir;
+        if (s < 1) s = 3;
+        if (s > 3) s = 1;
+        wake.sens = s;
+      }
       saveConfig(); dirty = true; break;
     case SETTINGS:
       snoozeDurationMin = constrain(snoozeDurationMin + dir, 1, 30);
@@ -789,11 +818,15 @@ void onPress() {
       if (screen == EDIT_ALARM) alarmField = 0; else wakeField = 0;
       dirty = true; break;
     case EDIT_ALARM:
-      alarmField = (alarmField + 1) % 3; dirty = true; break;
+      alarmField++;
+      if (alarmField > 2) alarmField = 0;
+      dirty = true; break;
     case EDIT_WAKE:
-      wakeField = (wakeField + 1) % 3; dirty = true; break;
+      wakeField++;
+      if (wakeField > 2) wakeField = 0;
+      dirty = true; break;
     case SETTINGS:
-      screen = MENU; dirty = true; break;        // single field → press returns to Menu
+      screen = MENU; dirty = true; break;        // one field, press returns to menu
     case RESTART:
       if (rChoiceYes) ESP.restart();
       else { screen = MENU; dirty = true; }
@@ -826,8 +859,7 @@ void logSensorData() {
   if (getLocalTime(&ti)) strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", &ti);
   else strcpy(ts, "time_error");
 
-  // Feed the classifier with the sample we just read (no extra I2C read). Returns
-  // true once per completed 30 s window, with lastRaw()/lastSmoothed() ready.
+  // feed the classifier; true when a 30s window completes
   bool haveStage = sleepClf.addSample(ax, ay, az);
   int  rawP = sleepClf.lastRaw(), smP = sleepClf.lastSmoothed();
 
@@ -843,7 +875,7 @@ void logSensorData() {
     stageFile.print(ts);                       stageFile.print(",");
     stageFile.print(rawP == 0 ? "deep" : "light"); stageFile.print(",");
     stageFile.println(smP  == 0 ? "deep" : "light");
-    stageFile.flush();                         // once per 30 s — cheap
+    stageFile.flush();                         // once per 30s
   }
   attachInterrupt(digitalPinToInterrupt(CLK_PIN), ISR_encoder, FALLING);
 }
@@ -858,16 +890,15 @@ void enterSleepMode() {
   dataFile.println("timestamp,aX,aY,aZ");
   writeCount = 0;
 
-  // Stage classifier: fresh window state + a fresh /sleep_stages.csv. Opened
-  // here only; closed only in exitSleepMode() (same single open/close pattern as
-  // dataFile, so a buzzer-time brownout can't corrupt a mid-write file).
-  if (stageFile) stageFile.close();   // guard vs. a stale handle (mirrors dataFile)
+  // fresh classifier state + fresh stage file. opened here, closed in exitSleepMode().
+  if (stageFile) stageFile.close();   // close stale handle
   SD.remove("/sleep_stages.csv");
   stageFile = SD.open("/sleep_stages.csv", FILE_WRITE);
   stageFile.println("timestamp,raw,smoothed");
   sleepClf.reset();
-  smartWakeUsed = false;             // arm smart wake for this session
-  sleepSummaryDirty = true;          // next Sleep Data view reparses this session
+  smartWakeUsed = false;             // arm smart wake
+  sleepSessionStarted = true;        // real data replaces the demo from now on
+  sleepSummaryDirty = true;          // reparse on next view
 
   ledcWrite(BL_PIN, 0);
   tft.fillScreen(TFT_BLACK);
@@ -880,40 +911,35 @@ void exitSleepMode() {
   if (stageFile) stageFile.close();   // the one place the stage file closes
   ledcWrite(BL_PIN, 255);
   enterHome();
-  wakeGuardMs = millis();             // block an accidental immediate re-sleep
-  // Don't fire a blocking weather fetch the instant we wake (it froze the UI and
-  // invited a second button press). Let it refresh ~20 s later, off the wake path.
+  wakeGuardMs = millis();             // block accidental immediate re-sleep
+  // delay weather refresh ~20s so waking doesn't freeze the UI
   lastWeatherMs = millis() - WEATHER_MS + 20000;
   Serial.println("Sleep logging stopped");
 }
 
-// Put the display back to sleep (backlight off) WITHOUT touching the open log
-// file — logging continues on the same handle, exactly like the original.
+// backlight off but keep the log file open (tracking continues)
 void screenSleep() {
   screen = HOME;
   ledcWrite(BL_PIN, 0);
   tft.fillScreen(TFT_BLACK);
 }
 
-// alarm ring
-// The alarm NEVER opens/closes/reopens the SD file. The file is opened once in
-// enterSleepMode() and closed once in exitSleepMode(); ringing only changes the
-// backlight + screen, so a buzzer-time brownout can't corrupt a mid-write file.
+// alarm ring. never touches the SD file (opened in enterSleepMode, closed in exitSleepMode).
 void startRinging() {
-  alarmFromSleep = sleeping;        // remember whether to return to sleep on snooze
-  ledcWrite(BL_PIN, 255);           // backlight on for the ring screen
-  enterHome();                      // draw the clock backdrop (file handle untouched)
+  alarmFromSleep = sleeping;        // remember if we came from sleep
+  ledcWrite(BL_PIN, 255);           // backlight on
+  enterHome();                      // draw clock
   ringing      = true;
   lastBeepMs   = 0;
   ringStartMs  = millis();
   alarmFlashOn = false;
 }
 
-// Full stop: silence; if we came from sleep, close the log + wake to HOME.
+// stop ringing for good
 void stopRinging() {
   ringing = false;
   noTone(BUZZER_PIN);
-  if (alarmFromSleep) exitSleepMode();   // the one place the file closes
+  if (alarmFromSleep) exitSleepMode();   // closes the log file
   else                enterHome();
   alarmFromSleep = false;
 }
@@ -922,25 +948,26 @@ void snoozeAlarm() {
   ringing = false;
   noTone(BUZZER_PIN);
   int total = alarmCfg.hour * 60 + alarmCfg.minute + snoozeDurationMin;
-  total %= (24 * 60);
-  alarmCfg.hour = total / 60; alarmCfg.minute = total % 60;  // temporary re-arm (not persisted)
+  if (total >= 1440) total -= 1440;    // wrap past midnight
+  alarmCfg.hour = total / 60;
+  alarmCfg.minute = total % 60;        // temporary re-arm (not persisted)
   lastCheckMin = -1;                                         // allow re-fire at snoozed time
-  if (alarmFromSleep) screenSleep();   // back to sleep; file stays open, logging continues
+  if (alarmFromSleep) screenSleep();   // back to sleep, log stays open
   else                enterHome();
 }
 
 void serviceRinging() {
   unsigned long now = millis();
-  if (now - ringStartMs >= RING_TIMEOUT_MS) {   // unanswered too long → auto-off, wake to HOME
+  if (now - ringStartMs >= RING_TIMEOUT_MS) {   // auto-off if unanswered
     stopRinging();
     return;
   }
-  updateDisplay();   // keep the clock (time/date/weather) drawn and current
+  updateDisplay();   // keep clock updated
   if (now - lastBeepMs >= 500) {
     lastBeepMs = now;
     tone(BUZZER_PIN, 1000, 200);
     alarmFlashOn = !alarmFlashOn;
-    // Flash the banner in the empty band below AM/PM — does NOT overlap the time.
+    // flash banner below AM/PM
     tft.fillRect(0, 205, 240, 42, TFT_BLACK);
     if (alarmFlashOn) {
       tft.setTextColor(COL_ACCENT, TFT_BLACK);
@@ -950,20 +977,19 @@ void serviceRinging() {
 }
 
 void checkAlarm() {
-  // Runs every loop in BOTH sleep and wake states.
+  // runs in both sleep and wake
   if (ringing || !alarmCfg.on) return;
   struct tm ti;
   if (!getLocalTime(&ti)) return;
 
-  // Smart wake: while sleeping, if we are inside the wake window before the alarm
-  // and the sleeper has been in light sleep long enough, ring early (once). Reuses
-  // the classifier's smoothed output — no extra MPU reads.
+  // smart wake: ring early if inside the wake window and in light sleep long enough
   if (wake.on && sleeping && !smartWakeUsed) {
-    int required = 4 - wake.sens;            // sens 3->1, 2->2, 1->3 windows (~30/60/90 s light)
-    if (required < 1) required = 1;          // guard vs. corrupt EEPROM sens==0
+    int required = 4 - wake.sens;            // sens 3->1, 2->2, 1->3 windows
+    if (required < 1) required = 1;          // guard bad EEPROM
     int alarmMin = alarmCfg.hour * 60 + alarmCfg.minute;
     int curMin   = ti.tm_hour   * 60 + ti.tm_min;
-    int diff = (alarmMin - curMin + 1440) % 1440;   // minutes until alarm (handles midnight wrap)
+    int diff = alarmMin - curMin;   // minutes until alarm
+    if (diff < 0) diff += 1440;     // wrap past midnight
     if (diff > 0 && diff <= wake.windowMin && sleepClf.lightRun() >= required) {
       smartWakeUsed = true;
       startRinging();
@@ -983,13 +1009,13 @@ unsigned long lastBackActionMs = 0;
 
 void handleBackButton() {
   unsigned long now = millis();
-  if (now - lastBackActionMs < BACK_LOCKOUT_MS) return;  // hard lockout vs. bounce
+  if (now - lastBackActionMs < BACK_LOCKOUT_MS) return;  // debounce lockout
   lastBackActionMs = now;
 
-  if (ringing)         { stopRinging(); return; }     // BACK during alarm = exit now (1 press)
-  if (sleeping)        { exitSleepMode(); return; }   // GPIO 33 leaves sleep mode, saves file
-  if (screen == HOME)  {                              // enter a fresh sleep session...
-    if (millis() - wakeGuardMs < WAKE_GUARD_MS) return;  // ...but not if we just woke (stray press)
+  if (ringing)         { stopRinging(); return; }     // back during alarm = stop
+  if (sleeping)        { exitSleepMode(); return; }   // leave sleep mode
+  if (screen == HOME)  {                              // start a sleep session
+    if (millis() - wakeGuardMs < WAKE_GUARD_MS) return;  // ignore stray press right after waking
     enterSleepMode(); return;
   }
   onBack();
@@ -1053,7 +1079,7 @@ void loop() {
   encBtn.loop();
   backBtn.loop();
 
-  // encoder rotation (one tick = one action)
+  // encoder rotation
   static int lastCounter = 0;
   noInterrupts();
   int c = counter;

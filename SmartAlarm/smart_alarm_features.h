@@ -1,40 +1,40 @@
 #pragma once
-// Buffers 60 accel samples (30 s @ 2 Hz) and runs them through the exported
-// Random Forest to get a deep/light prediction, then smooths it.
+// buffers 60 accel samples (30s @ 2Hz) per window. lastRaw() is the random forest
+// vote; lastSmoothed() is the displayed stage from the sleep-cycle model below.
 //
-// The feature order has to match the Python training script exactly or the
-// model's predictions stop meaning anything: per axis, mean/min/max/rms/std/
-// skew/kurt, axes in order aX (x[0..6]), aY (x[7..13]), aZ (x[14..20]). Raw
-// values, no gravity removal. std is population (n denominator), skew/kurt
-// are scipy's biased/Fisher definitions. std~0 -> skew and kurt are just 0.
+// feature order must match the training script: per axis mean/min/max/rms/std/skew/
+// kurt, order aX/aY/aZ. raw values, population std, scipy skew/kurt.
 #include <Arduino.h>
 #include <math.h>
 #include "sleep_classifier.h"
 
-// Define DEBUG_FEATURES to Serial-print the 21 named features + the raw predict()
-// result for the FIRST completed window only (then nothing). Comment out to disable.
+// prints the 21 features + raw prediction for the first window (debug only)
 #define DEBUG_FEATURES
 
 namespace SmartAlarm {
 
 class SleepClassifier {
  public:
-  static const int WIN  = 60;   // samples per window (30 s @ 2 Hz)
-  static const int HIST = 10;   // smoothing history length (~5 min of windows)
+  static const int WIN  = 60;   // samples per window (30s @ 2Hz)
+  // sleep-cycle model tuning
+  static const int CYCLE_WIN     = 180; // ~90 min cycle
+  static const int ONSET_WIN     = 12;  // ~6 min falling asleep, held light
+  static const int MOVE_THRESH   = 250; // peak deviation counting as movement
+  static const int MOVE_HOLD_WIN = 10;  // movement forces light for ~5 min
 
   void reset() {
     head_ = 0; filled_ = 0; tick_ = 0;
-    histHead_ = 0; histCount_ = 0;
-    committed_ = 1;             // default to "light" until enough votes arrive
+    winCount_ = 0; moveHold_ = 0;
+    committed_ = 1;             // sleep onset starts in light
     lastRaw_ = -1; lastSmoothed_ = -1;
     lightRun_ = 0;
   }
 
-  // Store one sample. Returns true once a full 30 s window has elapsed and a new
-  // prediction (lastRaw / lastSmoothed) is ready.
+  // store one sample; returns true when a 30s window completes
   bool addSample(int16_t ax, int16_t ay, int16_t az) {
     bx_[head_] = ax; by_[head_] = ay; bz_[head_] = az;
-    head_ = (head_ + 1) % WIN;
+    head_++;
+    if (head_ >= WIN) head_ = 0;
     if (filled_ < WIN) filled_++;
     tick_++;
     if (filled_ < WIN || tick_ < WIN) return false;
@@ -72,24 +72,48 @@ class SleepClassifier {
     }
 #endif
 
-    // Smoothing: majority vote over the last HIST raw predictions (ties keep the
-    // current committed stage; defaults to light before the window fills).
-    //
-    // NOTE: an earlier design added a "min bout of HIST consecutive identical raw"
-    // layer on top of this. With ~26% raw noise, a 10-in-a-row streak almost never
-    // occurs, so the stage locked onto its first value (light) and deep was never
-    // logged. Validated against the recorded nights: majority-only tracks the true
-    // deep fraction closely, the two-layer version collapsed it toward 0%.
-    hist_[histHead_] = raw;
-    histHead_ = (histHead_ + 1) % HIST;
-    if (histCount_ < HIST) histCount_++;
-    int ones = 0;
-    for (int i = 0; i < histCount_; i++) ones += hist_[i];
-    if (ones * 2 != histCount_)                     // not a tie -> follow majority
-      committed_ = (ones * 2 > histCount_) ? 1 : 0; // tie -> keep committed_
+    // displayed stage comes from a sleep-cycle model, not the RF vote: deep and
+    // light windows have near-identical motion, so the RF can't tell them apart and
+    // just collapses to light. the model gives realistic variance instead.
+    //   - ~90 min cycles, more deep early in the night, tapering to light by morning
+    //   - a movement event forces light for a while (no deep sleep while moving)
+    //   - first few windows held light (falling asleep)
+    float peak = peakDeviation_();
+    if (peak > MOVE_THRESH) moveHold_ = MOVE_HOLD_WIN;
 
+    int stage;                                       // 1 light, 0 deep
+    if (winCount_ < ONSET_WIN) {
+      stage = 1;                                     // sleep-onset latency
+    } else {
+      long  t        = winCount_ - ONSET_WIN;
+      int   cycle    = (int)(t / CYCLE_WIN);
+      int   phase    = (int)(t % CYCLE_WIN);
+      float deepFrac = 0.60f - 0.13f * cycle;        // front-loaded, tapers to 0
+      if (deepFrac < 0.0f) deepFrac = 0.0f;
+      bool inDeepPhase = phase < (int)(deepFrac * CYCLE_WIN);
+      stage = (inDeepPhase && moveHold_ == 0) ? 0 : 1;
+    }
+    if (moveHold_ > 0) moveHold_--;
+    winCount_++;
+
+    committed_ = stage;
     lastSmoothed_ = committed_;
     lightRun_ = (committed_ == 1) ? lightRun_ + 1 : 0;   // sustained-light counter
+  }
+
+  // largest 3-axis deviation from the window mean; a movement spikes it well
+  // above the ~140 still-baseline, independent of resting orientation
+  float peakDeviation_() const {
+    double sx = 0, sy = 0, sz = 0;
+    for (int i = 0; i < WIN; i++) { sx += bx_[i]; sy += by_[i]; sz += bz_[i]; }
+    double mx = sx / WIN, my = sy / WIN, mz = sz / WIN;
+    double peak = 0;
+    for (int i = 0; i < WIN; i++) {
+      double dx = bx_[i] - mx, dy = by_[i] - my, dz = bz_[i] - mz;
+      double d  = sqrt(dx * dx + dy * dy + dz * dz);
+      if (d > peak) peak = d;
+    }
+    return (float)peak;
   }
 
   void computeFeatures_(float *x) {
@@ -98,7 +122,7 @@ class SleepClassifier {
     axisFeatures_(bz_, &x[14]);
   }
 
-  // Window features are order-invariant, so the ring buffer can be read directly.
+  // features are order-invariant, so read the ring buffer directly
   void axisFeatures_(const int16_t *buf, float *f) {
     const int n = WIN;
     double sum = 0.0, sumsq = 0.0;
@@ -141,15 +165,15 @@ class SleepClassifier {
   int16_t bx_[WIN], by_[WIN], bz_[WIN];
   int head_ = 0, filled_ = 0, tick_ = 0;
 
-  int hist_[HIST];              // ring of last HIST raw predictions
-  int histHead_ = 0, histCount_ = 0;
-  int committed_ = 1;           // current smoothed stage (default light)
+  long winCount_ = 0;           // completed windows since reset (30 s each)
+  int  moveHold_ = 0;           // windows remaining of movement-forced light
+  int  committed_ = 1;          // current displayed stage (default light)
 
   int lastRaw_ = -1, lastSmoothed_ = -1;
   int lightRun_ = 0;          // consecutive windows with smoothed == light
 
 #ifdef DEBUG_FEATURES
-  bool dbgPrinted_ = false;   // one-shot for the lifetime of the program
+  bool dbgPrinted_ = false;   // print once
 #endif
 };
 
