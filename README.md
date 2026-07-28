@@ -266,4 +266,14 @@ docs/images/                          photos, schematic, PCB renders
 
 ---
 
+## About
+
+Built by Austin Zhai, second-year Computer Engineering student at UBC. A personal project built to
+get hands-on experience with the whole stack of an embedded product: firmware, on-device ML,
+schematic capture, and PCB layout — and with real-world sensor data, the kind that is noisy,
+self-labelled, and where the "obvious" model turns out to be learning a boundary that isn't in the
+signal.
+
+---
+
 <p align="center"><sub>Built by Austin Zhai</sub></p>
