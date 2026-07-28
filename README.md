@@ -2,7 +2,7 @@
 
 <p align="center">
   An ESP32 alarm clock that tracks your sleep with an onboard accelerometer<br>
-  and wakes you during <em>light</em> sleep — so you get up less groggy.
+  and wakes you during <em>light</em> sleep, so you get up less groggy.
 </p>
 
 <p align="center">
@@ -10,14 +10,14 @@
   <img src="https://img.shields.io/badge/framework-Arduino-00979D?logo=arduino&logoColor=white" alt="Framework: Arduino">
   <img src="https://img.shields.io/badge/display-ST7789%20240%C3%97320-1f6feb" alt="Display: ST7789 240x320">
   <img src="https://img.shields.io/badge/ML-Random%20Forest%20on--device-ff8c00" alt="ML: on-device Random Forest">
-  <img src="https://img.shields.io/badge/PCB-KiCad-314cb0" alt="PCB: KiCad">
+  <img src="https://img.shields.io/badge/PCB-Altium%20Designer-a5915f?logo=altiumdesigner&logoColor=white" alt="PCB: Altium Designer">
 </p>
 
 <p align="center">
   <img src="docs/images/clock.jpg" alt="The Smart Alarm clock on a breadboard showing the home screen" width="80%">
 </p>
 
-<p align="center"><sub>The home screen — NTP time, date, live weather, and alarm status, all flicker-free.</sub></p>
+<p align="center"><sub>The home screen: NTP time, date, live weather, and alarm status, all flicker-free.</sub></p>
 
 ---
 
@@ -27,12 +27,12 @@ A bedside clock I designed end to end: firmware, sleep-staging model, schematic,
 
 You clip the accelerometer to your mattress, hit **Enter Sleep Mode**, and the device logs
 motion all night at 2 Hz to an SD card. Every 30 seconds it scores that window as **light** or
-**deep** sleep. In the morning it doesn't just ring at 6:30 — it watches for the first moment
+**deep** sleep. In the morning it doesn't just ring at 6:30. It watches for the first moment
 you're in light sleep inside a window you choose, and rings *then*.
 
 Everything runs on the ESP32 itself. No phone, no cloud, no app.
 
-**Contents** — [Features](#features) · [Sleep tracking](#sleep-tracking) · [The ML story](#the-ml-story-and-why-the-forest-didnt-win) · [Smart wake](#smart-wake) · [Hardware](#hardware) · [Schematic](#schematic) · [PCB](#pcb-layout) · [Build it](#building--flashing)
+**Contents:** [Features](#features) · [Sleep tracking](#sleep-tracking) · [The ML story](#the-ml-story-and-why-the-forest-didnt-win) · [Smart wake](#smart-wake) · [Hardware](#hardware) · [Schematic](#schematic) · [PCB](#pcb-layout) · [Build it](#building--flashing)
 
 ---
 
@@ -41,10 +41,10 @@ Everything runs on the ESP32 itself. No phone, no cloud, no app.
 | | |
 |---|---|
 | **Clock + weather** | WiFi/NTP time on an incremental-redraw home face (only changed digits repaint, so there is zero flicker), plus current conditions and a 5-day OpenWeatherMap forecast. |
-| **Rotary-encoder UI** | A full menu system — alarm, smart alarm, sleep data, weather, settings, restart — driven by one encoder and one button. Ten-screen state machine. |
+| **Rotary-encoder UI** | A full menu system (alarm, smart alarm, sleep data, weather, settings, restart) driven by one encoder and one button. Ten-screen state machine. |
 | **Sleep tracking** | Logs MPU-6050 accelerometer data to SD at 2 Hz and classifies every 30 s window as light or deep. |
 | **Smart wake** | Rings early the moment you're in light sleep within your chosen window; falls back to the exact alarm time if that never happens. |
-| **Hypnogram screen** | A two-lane graph of last night with light/deep totals, parsed back off the SD card — so it survives a reboot. |
+| **Hypnogram screen** | A two-lane graph of last night with light/deep totals, parsed back off the SD card, so it survives a reboot. |
 | **Persistence** | Alarm, smart-wake, and snooze settings live in EEPROM and reload on boot. |
 
 ---
@@ -81,7 +81,7 @@ MPU-6050  ──2 Hz──▶  /sleep_data.csv        raw aX,aY,aZ, one row per 
 ```
 
 The SD files are opened exactly once on entering sleep mode and closed exactly once on exit.
-An earlier version reopened them per write, which corrupted the card — that lesson is now
+An earlier version reopened them per write, which corrupted the card. That lesson is now
 enforced in the architecture.
 
 ### Training data
@@ -100,8 +100,8 @@ This is the part I'd want to talk about in an interview.
 I trained a Random Forest in [`ml/Aura_Clock_Random_Forest_ML.ipynb`](ml/Aura_Clock_Random_Forest_ML.ipynb):
 30 s windows with 10 s stride, 21 statistical features, Nights 1–2 held out as a test set,
 `class_weight='balanced'`, then exported to C with `micromlgen` and compiled into the firmware
-as [`sleep_classifier.h`](SmartAlarm/sleep_classifier.h) — ~1.4 MB of generated code running
-entirely on-chip.
+as [`sleep_classifier.h`](SmartAlarm/sleep_classifier.h): roughly 1.4 MB of generated code
+running entirely on-chip.
 
 It works, it fits, it runs in real time. It also **cannot actually tell deep from light**:
 
@@ -112,8 +112,8 @@ It works, it fits, it runs in real time. It also **cannot actually tell deep fro
     accuracy                          0.652      5004
 ```
 
-Deep-sleep recall of 0.19 is not a model I'd ship a feature on. I tried the usual moves —
-removing the gravity offset, pushing 20 trees to 100 — and 100 trees "improved" accuracy to
+Deep-sleep recall of 0.19 is not a model I'd ship a feature on. I tried the usual moves
+(removing the gravity offset, pushing 20 trees to 100), and 100 trees "improved" accuracy to
 0.768 only by predicting *light* almost every time (deep recall fell to 0.10). Classic
 majority-class collapse.
 
@@ -126,7 +126,7 @@ light windows are near-identical in motion.
 | std | 69.0 | 69.4 |
 
 A wrist/mattress accelerometer alone doesn't separate those classes without real polysomnography
-labels — my labels were self-reported, so the model was being asked to learn a boundary that
+labels. Mine were self-reported, so the model was being asked to learn a boundary that
 isn't in the signal. **More trees were never going to fix a labelling problem.**
 
 **What I shipped instead.** The RF vote is still computed every window and logged to the `raw`
@@ -134,11 +134,11 @@ column, so the comparison stays honest and visible. But the *displayed* stage co
 actigraphy-style sleep-cycle model in [`smart_alarm_features.h`](SmartAlarm/smart_alarm_features.h):
 
 - ~90-minute cycles, with deep sleep front-loaded and tapering toward morning
-- any movement event (peak deviation > threshold) forces light for ~5 minutes — you don't move during deep sleep
+- any movement event (peak deviation > threshold) forces light for ~5 minutes, because you don't move during deep sleep
 - the first ~6 minutes are held light, for falling asleep
 
 Simulated over the recorded nights it produces 20–27% deep with realistic cycling, which matches
-published norms. It's a heuristic, and the README says so — but it's a heuristic that's *right*
+published norms. It's a heuristic, and the README says so, but it's a heuristic that's *right*
 for the physics, instead of a model that's wrong with a confusion matrix attached.
 
 ---
@@ -171,7 +171,7 @@ ESP32 DevKit · 240×320 ST7789 TFT (TFT_eSPI) · MPU-6050 · microSD · rotary 
 | BACK / sleep button | 33 | ezButton, `INPUT_PULLUP` |
 | Rotary encoder CLK | 16 | interrupt on FALLING, `IRAM_ATTR` |
 | Rotary encoder DT | 4 | |
-| Rotary encoder SW | 34 | external pull-up — input-only pin |
+| Rotary encoder SW | 34 | external pull-up, input-only pin |
 | Buzzer (passive) | 25 | `tone()` / `noTone()` |
 | MPU-6050 SDA / SCL | 21 / 22 | I²C |
 | SD card CS | 5 | SPI |
@@ -183,12 +183,12 @@ real-world double-fires on the BACK button.
 ### Schematic
 
 <p align="center">
-  <img src="docs/images/schematic.jpg" alt="KiCad schematic, split into passive components, active components, and microcontroller blocks" width="92%">
+  <img src="docs/images/schematic.jpg" alt="Altium schematic, split into passive components, active components, and microcontroller blocks" width="92%">
 </p>
 
-Drawn in KiCad and organised into three labelled blocks — passive components (buzzer, button,
-encoder header, SD header), active components (MPU-6050, TFT), and the ESP32 itself — so the net
-names read the same way the firmware's pin map does.
+Drawn in Altium Designer and organised into three labelled blocks: passive components (buzzer,
+button, encoder header, SD header), active components (MPU-6050, TFT), and the ESP32 itself, so
+the net names read the same way the firmware's pin map does.
 
 ### PCB layout
 
@@ -230,7 +230,7 @@ arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=huge_app SmartAlarm
 > [!IMPORTANT]
 > **`huge_app` is not optional.** The bundled Random Forest overflows the default partition's
 > ~1.3 MB app slot. Huge APP gives 3 MB (no OTA; SD logging unaffected) and the sketch lands at
-> ~42%. **In the Arduino IDE the FQBN flag above does nothing** — you must set
+> ~42%. **In the Arduino IDE the FQBN flag above does nothing.** You must set
 > **Tools ▸ Partition Scheme ▸ "Huge APP (3MB No OTA/1MB SPIFFS)"** by hand, or the build fails
 > with `text section exceeds available space`.
 
@@ -242,7 +242,7 @@ The city is hardcoded to `Calgary,CA` in `OWM_CITY`; weather refreshes every 15 
 
 ```
 SmartAlarm/
-  SmartAlarm.ino            firmware — UI, state machine, alarm, SD, weather (~1,100 lines)
+  SmartAlarm.ino            firmware: UI, state machine, alarm, SD, weather (~1,100 lines)
   smart_alarm_features.h    feature extraction + sleep-cycle model
   sleep_classifier.h        micromlgen-exported Random Forest
 ml/
@@ -262,7 +262,7 @@ docs/images/                          photos, schematic, PCB renders
 - **Add a REM class.** Two stages is a simplification; the cycle model already has the structure
   to support three.
 - **Cut the model size.** 1.4 MB of generated C for 20 trees is why the huge_app partition is
-  needed — quantised thresholds or a hand-rolled tree walker would reclaim most of it.
+  needed. Quantised thresholds or a hand-rolled tree walker would reclaim most of it.
 
 ---
 
