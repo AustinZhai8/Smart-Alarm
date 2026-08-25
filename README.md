@@ -40,7 +40,7 @@ Everything runs on the ESP32 itself. No phone, no cloud, no app.
 
 <p align="center">
   <a href="https://github.com/AustinZhai8/Smart-Alarm/raw/main/docs/images/SmartAlarmDemo.mp4">
-    <img src="docs/images/SmartAlarmDemo.gif" alt="Animated walkthrough: paging through the menus, opening Sleep Data, and entering sleep mode" width="560">
+    <img src="docs/images/SmartAlarmDemo.webp" alt="Animated walkthrough: paging through the menus, opening Sleep Data, and entering sleep mode" width="840">
   </a>
 </p>
 
@@ -284,7 +284,7 @@ ml/
   Aura_Clock_Random_Forest_ML.ipynb   training + export notebook
   log_sleep.py                        serial data logger
   data/                               8 labelled nights + no-movement control
-docs/images/                          photos, demo clip + GIF, schematic, PCB renders
+docs/images/                          photos, demo clip + animation, schematic, PCB renders
 ```
 
 ---
