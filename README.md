@@ -40,7 +40,7 @@ Everything runs on the ESP32 itself. No phone, no cloud, no app.
 
 <p align="center">
   <a href="https://github.com/AustinZhai8/Smart-Alarm/raw/main/docs/images/SmartAlarmDemo.mp4">
-    <img src="docs/images/SmartAlarmDemo.webp" alt="Animated walkthrough: paging through the menus, opening Sleep Data, and entering sleep mode" width="840">
+    <img src="docs/images/SmartAlarmDemo.webp" alt="Animated walkthrough: paging through the menus, opening Sleep Data, and entering sleep mode" width="980">
   </a>
 </p>
 
