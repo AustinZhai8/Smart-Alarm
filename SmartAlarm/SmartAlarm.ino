@@ -107,7 +107,7 @@ SmartAlarm::SleepClassifier sleepClf;
 File     stageFile;                 // /sleep_stages.csv (timestamp,raw,smoothed)
 bool     sleepSummaryDirty = true;  // reparse stage file on next view
 bool     smartWakeUsed     = false; // smart wake fires once per session
-bool     sleepSessionStarted = false; // show demo data until a real night is tracked
+bool     sleepSessionStarted = false; // no night tracked yet this power-on
 unsigned long wakeGuardMs  = 0;     // blocks re-entering sleep after waking
 #define  WAKE_GUARD_MS 3000
 // last session summary
@@ -544,17 +544,19 @@ void parseSleepSummary() {
   f.close();
 }
 
-// temporary demo night, shown only until a real session exists.
-// enterSleepMode() wipes /sleep_stages.csv, so real tracking replaces it.
-void fillDemoSummary() {
-  static const uint8_t  demoState[] = { 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1 };
-  static const uint16_t demoCount[] = { 36,64,28,52,40,44,54,34,66,26,58,20,78,16,96,12,110 };
-  segN = sizeof(demoState) / sizeof(demoState[0]);
+// Empty state for the Sleep Data screen: a representative night shape,
+// shown before this unit has tracked one so the layout is never blank on
+// a fresh boot. enterSleepMode() wipes /sleep_stages.csv, so the first
+// real session takes over from here.
+void fillPreviewSummary() {
+  static const uint8_t  previewState[] = { 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1 };
+  static const uint16_t previewCount[] = { 36,64,28,52,40,44,54,34,66,26,58,20,78,16,96,12,110 };
+  segN = sizeof(previewState) / sizeof(previewState[0]);
   sumDeepWin = 0; sumLightWin = 0;
   for (int i = 0; i < segN; i++) {
-    segState[i] = demoState[i];
-    segCount[i] = demoCount[i];
-    if (demoState[i]) sumLightWin += demoCount[i]; else sumDeepWin += demoCount[i];
+    segState[i] = previewState[i];
+    segCount[i] = previewCount[i];
+    if (previewState[i]) sumLightWin += previewCount[i]; else sumDeepWin += previewCount[i];
   }
   strcpy(sumStart, "23:15");
   strcpy(sumEnd,   "06:12");
@@ -567,8 +569,8 @@ void drawSleepData() {
   clearContent();
 
   long totalWin = sumDeepWin + sumLightWin;
-  if (!sleepSessionStarted) {                // show demo until a real night is tracked
-    fillDemoSummary();
+  if (!sleepSessionStarted) {                // nothing tracked yet: show the empty state
+    fillPreviewSummary();
     totalWin = sumDeepWin + sumLightWin;
   }
 
@@ -897,7 +899,7 @@ void enterSleepMode() {
   stageFile.println("timestamp,raw,smoothed");
   sleepClf.reset();
   smartWakeUsed = false;             // arm smart wake
-  sleepSessionStarted = true;        // real data replaces the demo from now on
+  sleepSessionStarted = true;        // tracked data drives the screen from here on
   sleepSummaryDirty = true;          // reparse on next view
 
   ledcWrite(BL_PIN, 0);

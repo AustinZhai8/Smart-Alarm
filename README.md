@@ -39,13 +39,10 @@ Everything runs on the ESP32 itself. No phone, no cloud, no app.
 ## Demo
 
 <p align="center">
-  <video src="https://github.com/AustinZhai8/Smart-Alarm/raw/main/docs/images/SmartAlarmDemo.mp4" controls muted playsinline></video>
+  <a href="https://github.com/AustinZhai8/Smart-Alarm/raw/main/docs/images/SmartAlarmDemo.mp4"><b>&#9654;&nbsp; Watch the walkthrough &nbsp;&middot;&nbsp; 38 s</b></a>
 </p>
 
-<p align="center"><sub>
-  The finished board in use: the whole UI driven by one rotary encoder and one button.<br>
-  Player not loading? <a href="docs/images/SmartAlarmDemo.mp4">Open the clip directly</a>.
-</sub></p>
+<p align="center"><sub>The finished board in use: the whole UI driven by one rotary encoder and one button.</sub></p>
 
 ---
 
@@ -68,7 +65,7 @@ Everything runs on the ESP32 itself. No phone, no cloud, no app.
   <img src="docs/images/SmartAlarmSleepData.png" alt="The Sleep Data screen showing a two-lane hypnogram with light and deep totals" width="88%">
 </p>
 
-<p align="center"><sub>A tracked night: 23:15 to 06:12, 6 h 57 m total, split into 4 h 43 m light (top lane) and 2 h 14 m deep (bottom lane).</sub></p>
+<p align="center"><sub>The Sleep Data screen: time asleep, a two-lane hypnogram, and light/deep totals, read back off the SD card so it survives a reboot. Shown here with the built-in preview night, which the first tracked session replaces.</sub></p>
 
 The pipeline, from mattress to that screen:
 
