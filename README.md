@@ -14,10 +14,10 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/clock.jpg" alt="The Smart Alarm clock on a breadboard showing the home screen" width="80%">
+  <img src="docs/images/SmartAlarmMain.png" alt="The finished Smart Alarm PCB showing the home screen with time, date, weather and alarm status" width="88%">
 </p>
 
-<p align="center"><sub>The home screen: NTP time, date, live weather, and alarm status, all flicker-free.</sub></p>
+<p align="center"><sub>The finished board. Home screen: NTP time, date, live weather, and alarm status, all flicker-free.</sub></p>
 
 ---
 
@@ -32,7 +32,20 @@ you're in light sleep inside a window you choose, and rings *then*.
 
 Everything runs on the ESP32 itself. No phone, no cloud, no app.
 
-**Contents:** [Features](#features) · [Sleep tracking](#sleep-tracking) · [The ML story](#the-ml-story-and-why-the-forest-didnt-win) · [Smart wake](#smart-wake) · [Hardware](#hardware) · [Schematic](#schematic) · [PCB](#pcb-layout) · [Build it](#building--flashing)
+**Contents:** [Demo](#demo) · [Features](#features) · [Sleep tracking](#sleep-tracking) · [The ML story](#the-ml-story-and-why-the-forest-didnt-win) · [Smart wake](#smart-wake) · [Breadboard → board](#from-breadboard-to-board) · [Hardware](#hardware) · [Build it](#building--flashing)
+
+---
+
+## Demo
+
+<p align="center">
+  <video src="https://github.com/AustinZhai8/Smart-Alarm/raw/main/docs/images/SmartAlarmDemo.mp4" controls muted playsinline></video>
+</p>
+
+<p align="center"><sub>
+  The finished board in use: the whole UI driven by one rotary encoder and one button.<br>
+  Player not loading? <a href="docs/images/SmartAlarmDemo.mp4">Open the clip directly</a>.
+</sub></p>
 
 ---
 
@@ -52,10 +65,10 @@ Everything runs on the ESP32 itself. No phone, no cloud, no app.
 ## Sleep tracking
 
 <p align="center">
-  <img src="docs/images/sleep-data.jpg" alt="The Sleep Data screen showing a two-lane hypnogram with light and deep totals" width="62%">
+  <img src="docs/images/SmartAlarmSleepData.png" alt="The Sleep Data screen showing a two-lane hypnogram with light and deep totals" width="88%">
 </p>
 
-<p align="center"><sub>A tracked night: 6 h 57 m total, split into 4 h 43 m light (top lane) and 2 h 14 m deep (bottom lane).</sub></p>
+<p align="center"><sub>A tracked night: 23:15 to 06:12, 6 h 57 m total, split into 4 h 43 m light (top lane) and 2 h 14 m deep (bottom lane).</sub></p>
 
 The pipeline, from mattress to that screen:
 
@@ -161,6 +174,29 @@ running; the alarm auto-silences after 3 minutes if you don't answer.
 
 ---
 
+## From breadboard to board
+
+<p align="center">
+  <img src="docs/images/clock.jpg" alt="The original breadboard prototype: two breadboards, an ESP32, a taped-on TFT and a nest of jumper wires" width="70%">
+</p>
+
+<p align="center"><sub>Where it started. Same firmware, same home screen, considerably more wire.</sub></p>
+
+The first version lived on two breadboards, with the TFT taped to the front so it would stand up
+like a clock. It worked, but it made every problem harder to see: a jumper backing halfway out of
+a rail looks exactly like a firmware bug, and the SPI runs to the display were long enough that
+one knocked wire meant a blank screen instead of a time.
+
+That prototype is what settled the design. Pin 34 turned out to be input-only, so the encoder
+switch needed an external pull-up. The BACK button double-fired often enough that it earned two
+layers of protection in software, a 150 ms debounce *plus* a 400 ms hard lockout. Both of those
+were discovered on the breadboard and carried straight into the schematic.
+
+Once the pinout stopped changing, I redrew the whole thing in Altium and had it fabricated. The
+board at the top of this page is that design, running the same sketch.
+
+---
+
 ## Hardware
 
 ESP32 DevKit · 240×320 ST7789 TFT (TFT_eSPI) · MPU-6050 · microSD · rotary encoder · passive buzzer.
@@ -176,9 +212,6 @@ ESP32 DevKit · 240×320 ST7789 TFT (TFT_eSPI) · MPU-6050 · microSD · rotary 
 | MPU-6050 SDA / SCL | 21 / 22 | I²C |
 | SD card CS | 5 | SPI |
 | TFT MOSI / SCLK / CS / DC / RST | 13 / 14 / 15 / 27 / 26 | set in `User_Setup.h` |
-
-Buttons get two layers of bounce protection: a 150 ms debounce plus a 400 ms hard lockout, after
-real-world double-fires on the BACK button.
 
 ### Schematic
 
@@ -249,7 +282,7 @@ ml/
   Aura_Clock_Random_Forest_ML.ipynb   training + export notebook
   log_sleep.py                        serial data logger
   data/                               8 labelled nights + no-movement control
-docs/images/                          photos, schematic, PCB renders
+docs/images/                          photos, demo clip, schematic, PCB renders
 ```
 
 ---
