@@ -2,7 +2,7 @@
 
 <p align="center">
   An ESP32 alarm clock that tracks your sleep with an onboard accelerometer<br>
-  and wakes you during <em>light</em> sleep, so you get up less groggy.
+  and wakes you during <em>light</em> sleep, so you can lock in during the day.
 </p>
 
 <p align="center">
@@ -108,9 +108,7 @@ format.
 
 ---
 
-## The ML story (and why the forest didn't win)
-
-This is the part I'd want to talk about in an interview.
+## The ML story
 
 I trained a Random Forest in [`ml/Aura_Clock_Random_Forest_ML.ipynb`](ml/Aura_Clock_Random_Forest_ML.ipynb):
 30 s windows with 10 s stride, 21 statistical features, Nights 1–2 held out as a test set,
